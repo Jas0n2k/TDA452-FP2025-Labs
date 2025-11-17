@@ -1,0 +1,123 @@
+module BlackJack where
+import Cards
+import RunGame
+import Test.QuickCheck
+
+hand2 = Add (Card (Numeric 2) Hearts)
+            (Add (Card Jack Spades) Empty)
+
+-- | Additional test hands
+
+hand3 = Add (Card Ace Hearts) (Add (Card (Numeric 2) Hearts)
+            (Add (Card Jack Spades) Empty))
+
+hand4 = Add (Card (Numeric 3) Hearts)
+            (Add (Card Jack Spades) Empty)
+
+bustHand = Add (Card (Numeric 10) Hearts)
+            (Add (Card King Spades)
+            (Add (Card (Numeric 5) Diamonds) Empty))
+
+-- | A0. All recursive steps of the size function 
+sizeSteps :: [Integer]
+sizeSteps = [ size hand2, 
+            size (Add (Card (Numeric 2) Hearts)
+                        (Add (Card Jack Spades) Empty))
+            ,1 + size (Add (Card Jack Spades) Empty)
+            ,2 + size Empty
+            ,2]
+
+-- | A1. Shows the cards in it in a nice format.
+
+-- | Displays the card in a nice format, e.g "Jack of Spades"
+displayCard :: Card -> String
+displayCard card = displayRank (rank card) ++ " of " ++ show(suit card) 
+    where 
+        displayRank :: Rank -> String
+        displayRank (Numeric n) = show n
+        displayRank r = show r
+
+-- | Displays the cards of a hand on multiple lines
+display :: Hand -> String
+display Empty = ""
+display (Add card hand) = displayCard (card) ++ "\n" ++ display hand
+
+-- | A2: Compute the value of a hand
+
+--  | Computes the initial value of a hand with Aces counted as 11
+initialValue :: Hand -> Integer
+initialValue Empty = 0
+initialValue (Add card hand) = valueRank (rank card) + initialValue hand
+    where 
+        valueRank :: Rank -> Integer
+        valueRank (Numeric n) = n
+        valueRank Ace         = 11
+        valueRank _           = 10 
+
+-- | Calculates the number of aces in a hand
+numberOfAces :: Hand -> Integer
+numberOfAces Empty          = 0
+numberOfAces (Add (Card Ace _) hand) = 1 + numberOfAces hand
+numberOfAces (Add _ hand)   = numberOfAces hand
+
+-- Calculates the value of a hand, and counts aces as 1 if the initial value exceeds 21
+value :: Hand -> Integer
+value hand 
+    | initial > 21 = initial - (10 * numberOfAces hand)
+    | otherwise    = initial
+    where 
+        initial  = initialValue hand
+
+-- | A3: Is the player bust?
+
+-- Tells if the value of a hand exceeds 21
+gameOver :: Hand -> Bool
+gameOver hand = value hand > 21
+
+-- | A4: Who won?
+
+-- | Given the hands of the guest and the bank, determines the winner based on the BlackJack rules
+-- | Rules:
+-- | 1. If Guest is not bust, and Bank is bust => Guest wins
+-- | 2. If Guest is not bust, and Guest's value > Bank's value => Guest wins
+-- | 3. Otherwise, Bank wins (e.g. both bust, or Bank not bust and its value >= Guest's value)
+winner :: Hand -> Hand -> Player
+winner guest bank 
+    | guestValue <= 21 && (bankValue > 21 || guestValue > bankValue) = Guest
+    | otherwise = Bank
+    where guestValue = value guest
+          bankValue = value bank
+
+---- Section B ----
+
+-- | B1: Puts one hand above another 
+(<+) :: Hand -> Hand -> Hand
+Empty <+ Empty = Empty
+first <+ Empty = first
+Empty <+ second = second
+(Add card restOfFirst) <+ second = Add card (restOfFirst <+ second)
+
+
+prop_onTopOf_assoc :: Hand -> Hand -> Hand -> Bool 
+prop_onTopOf_assoc p1 p2 p3 = p1<+(p2<+p3) == (p1<+p2)<+p3
+
+prop_size_onTopOf :: Hand -> Hand -> Bool
+prop_size_onTopOf first second = size (first <+ second) == (size first + size second)
+
+-- | B2: Builds a full deck of 52 cards
+
+rank_numerics = [ (Numeric n) | n <- [2..10] ]
+rank_faces    = [ Jack, Queen, King, Ace]
+rank_all = rank_numerics ++ rank_faces
+all_cards = [ Card rank suit | rank <- rank_all, suit <- [Hearts, Spades, Diamonds, Clubs]]
+
+fullDeck :: Hand
+fullDeck = constructHand all_cards
+    where
+        constructHand :: [Card] -> Hand
+        constructHand [] = Empty
+        constructHand (card:cards) = Add card (constructHand cards)
+
+-- | B3
+
+-- draw :: Hand -> Hand -> (Hand,Hand)
