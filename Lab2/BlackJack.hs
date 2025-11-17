@@ -2,6 +2,7 @@ module BlackJack where
 import Cards
 import RunGame
 import Test.QuickCheck
+import System.Random
 
 hand2 = Add (Card (Numeric 2) Hearts)
             (Add (Card Jack Spades) Empty)
@@ -17,6 +18,12 @@ hand4 = Add (Card (Numeric 3) Hearts)
 bustHand = Add (Card (Numeric 10) Hearts)
             (Add (Card King Spades)
             (Add (Card (Numeric 5) Diamonds) Empty))
+
+hand5 = Add (Card (Numeric 2) Hearts)
+            (Add (Card (Numeric 3) Diamonds)
+            (Add (Card (Numeric 4) Spades)
+            (Add (Card (Numeric 5) Clubs)
+            (Add (Card (Numeric 6) Hearts) Empty))))
 
 -- | A0. All recursive steps of the size function 
 sizeSteps :: [Integer]
@@ -90,17 +97,18 @@ winner guest bank
 
 ---- Section B ----
 
--- | B1: Puts one hand above another 
+-- | B1: Puts one hand above the other
 (<+) :: Hand -> Hand -> Hand
 Empty <+ Empty = Empty
 first <+ Empty = first
 Empty <+ second = second
 (Add card restOfFirst) <+ second = Add card (restOfFirst <+ second)
 
-
+-- Verifies that placing a hand on top of another is an associative operator
 prop_onTopOf_assoc :: Hand -> Hand -> Hand -> Bool 
 prop_onTopOf_assoc p1 p2 p3 = p1<+(p2<+p3) == (p1<+p2)<+p3
 
+-- Verifies that the size of combined hands is the sum of the sizes of each hand
 prop_size_onTopOf :: Hand -> Hand -> Bool
 prop_size_onTopOf first second = size (first <+ second) == (size first + size second)
 
@@ -109,8 +117,10 @@ prop_size_onTopOf first second = size (first <+ second) == (size first + size se
 rank_numerics = [ (Numeric n) | n <- [2..10] ]
 rank_faces    = [ Jack, Queen, King, Ace]
 rank_all = rank_numerics ++ rank_faces
+-- List of all combinations of cards
 all_cards = [ Card rank suit | rank <- rank_all, suit <- [Hearts, Spades, Diamonds, Clubs]]
 
+-- Constructs a hand with all available cards
 fullDeck :: Hand
 fullDeck = constructHand all_cards
     where
@@ -118,6 +128,86 @@ fullDeck = constructHand all_cards
         constructHand [] = Empty
         constructHand (card:cards) = Add card (constructHand cards)
 
--- | B3
+-- | B3: Given a deck and a hand, draw one card from the deck and put on the hand.
+-- |    Return both the deck and the hand (in that order). 
 
--- draw :: Hand -> Hand -> (Hand,Hand)
+-- Draws one card from the deck and adds it to the hand
+draw :: Hand -> Hand -> (Hand,Hand)
+draw Empty hand = error "draw: The deck is empty."
+draw (Add card deck) hand = (newDeck, newHand)
+    where
+        newDeck = deck 
+        newHand = Add card hand
+
+-- | B4: Given a deck, play for the bank according to the rules above (starting with an empty hand)
+-- |     Return the bank’s final hand.
+
+-- The bank draws cards until its value reaches at least 16
+playBank :: Hand -> Hand
+playBank deck = playBankHelper deck Empty
+    where 
+        playBankHelper deck hand 
+            | (value biggerHand) < 16 = playBankHelper smallerDeck biggerHand
+            | otherwise = biggerHand
+                where (smallerDeck,biggerHand) = draw deck hand
+
+-- | B5: Shuffles the given hand/deck
+
+
+-- Reverses the given hand
+reverseHand :: Hand -> Hand
+reverseHand Empty = Empty
+reverseHand (Add card hand) = reverseHand hand <+ Add card Empty
+
+-- Shuffles the given hand using the provided random generator
+shuffleDeck :: StdGen -> Hand -> Hand
+shuffleDeck g hand = shuffleDeckHelper g hand Empty (size hand)
+    where 
+        shuffleDeckHelper :: StdGen -> Hand -> Hand -> Int -> Hand
+        shuffleDeckHelper g hand acc i
+            | i > 0 = shuffleDeckHelper g' handWithRemoved (Add removed acc) (i-1)
+            | otherwise = acc
+
+            where 
+                (r, g') = randomR (1, i) g
+                (removed, handWithRemoved) = removeNthCard r hand
+
+-- Removes the n:th card of the hand and returns (removed hand, all other cards)
+removeNthCard :: Int -> Hand -> (Card, Hand)
+removeNthCard _ Empty = error "removeNthCard: Hand is empty."
+removeNthCard i hand = removeHelper hand Empty i 0
+    where 
+        removeHelper :: Hand -> Hand -> Int -> Int -> (Card, Hand)
+        removeHelper Empty _ _ _  = (Card Jack Spades, Empty)
+        removeHelper (Add card restOfHand) acc target i
+            | not (i == target - 1) = removeHelper restOfHand (Add card acc) target (i + 1)
+            | otherwise = (card, (reverseHand acc) <+ restOfHand)
+
+-- Checks if the card belongs to the hand
+belongsTo :: Card -> Hand -> Bool 
+c `belongsTo` Empty = False 
+c `belongsTo` (Add c' h) = c == c' || c `belongsTo` h
+
+-- Verifies that shuffling a 
+prop_shuffle_sameCards :: StdGen -> Card -> Hand -> Bool 
+prop_shuffle_sameCards g c h = c `belongsTo` h == c `belongsTo` shuffleDeck g h
+
+-- Verifies that the size of the hand remains the same after shuffling
+prop_size_shuffle :: StdGen -> Hand -> Bool
+prop_size_shuffle g hand = size hand == size (shuffleDeck g hand)
+
+-- B6: Implementation of the game
+
+implementation = Interface
+  { iFullDeck = fullDeck
+  , iValue    = value
+  , iDisplay  = display
+  , iGameOver = gameOver
+  , iWinner   = winner 
+  , iDraw     = draw
+  , iPlayBank = playBank
+  , iShuffle  = shuffleDeck
+  }
+
+main :: IO () 
+main = runGame implementation
