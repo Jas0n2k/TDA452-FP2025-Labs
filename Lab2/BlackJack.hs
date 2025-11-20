@@ -99,8 +99,6 @@ winner guest bank
 
 -- | B1: Puts one hand above the other
 (<+) :: Hand -> Hand -> Hand
-Empty <+ Empty = Empty
-first <+ Empty = first
 Empty <+ second = second
 (Add card restOfFirst) <+ second = Add card (restOfFirst <+ second)
 
@@ -120,13 +118,13 @@ rank_all = rank_numerics ++ rank_faces
 -- List of all combinations of cards
 all_cards = [ Card rank suit | rank <- rank_all, suit <- [Hearts, Spades, Diamonds, Clubs]]
 
+constructHand :: [Card] -> Hand
+constructHand [] = Empty
+constructHand (card:cards) = Add card (constructHand cards)
+
 -- Constructs a hand with all available cards
 fullDeck :: Hand
 fullDeck = constructHand all_cards
-    where
-        constructHand :: [Card] -> Hand
-        constructHand [] = Empty
-        constructHand (card:cards) = Add card (constructHand cards)
 
 -- | B3: Given a deck and a hand, draw one card from the deck and put on the hand.
 -- |    Return both the deck and the hand (in that order). 
@@ -154,34 +152,30 @@ playBank deck = playBankHelper deck Empty
 -- | B5: Shuffles the given hand/deck
 
 
--- Reverses the given hand
-reverseHand :: Hand -> Hand
-reverseHand Empty = Empty
-reverseHand (Add card hand) = reverseHand hand <+ Add card Empty
-
 -- Shuffles the given hand using the provided random generator
 shuffleDeck :: StdGen -> Hand -> Hand
-shuffleDeck g hand = shuffleDeckHelper g hand Empty (size hand)
+shuffleDeck g hand = shuffleDeckHelper g hand Empty (size hand) -- Start with empty accumulation hand, and pick one card at a time from the given hand
     where 
+        -- Moves i cards from hand to acc in random order
+        -- the index i indicates how many cards are left to pick from the hand
         shuffleDeckHelper :: StdGen -> Hand -> Hand -> Int -> Hand
         shuffleDeckHelper g hand acc i
-            | i > 0 = shuffleDeckHelper g' handWithRemoved (Add removed acc) (i-1)
-            | otherwise = acc
+            | i == 0    = acc -- When no cards left to pick, returns the accumulated & shuffled hand 
+            | otherwise = shuffleDeckHelper g' restAfterRemoval (Add removed acc) (i-1) -- Recurses to pick next card
 
             where 
-                (r, g') = randomR (1, i) g
-                (removed, handWithRemoved) = removeNthCard r hand
+                (r, g') = randomR (1, i) g -- Picks a random index from 1 to i
+                (removed, restAfterRemoval) = removeNthCard r hand -- Remove the nth card from the hand  
 
--- Removes the n:th card of the hand and returns (removed hand, all other cards)
+-- Removes the n:th card of the hand and returns (removedCard, restCards)
+-- n ranges from 1 to (size hand)
 removeNthCard :: Int -> Hand -> (Card, Hand)
-removeNthCard _ Empty = error "removeNthCard: Hand is empty."
-removeNthCard i hand = removeHelper hand Empty i 0
+removeNthCard _ Empty = error "removeNthCard: The hand is empty."
+removeNthCard 1 (Add c rest) = (c, rest)  -- Base case: removes the first card
+removeNthCard n (Add c rest) = (removed, Add c restAfterRemoval) -- Recurses to find the nth card
     where 
-        removeHelper :: Hand -> Hand -> Int -> Int -> (Card, Hand)
-        removeHelper Empty _ _ _  = (Card Jack Spades, Empty)
-        removeHelper (Add card restOfHand) acc target i
-            | not (i == target - 1) = removeHelper restOfHand (Add card acc) target (i + 1)
-            | otherwise = (card, (reverseHand acc) <+ restOfHand)
+        (removed, restAfterRemoval) = removeNthCard (n-1) rest
+
 
 -- Checks if the card belongs to the hand
 belongsTo :: Card -> Hand -> Bool 
