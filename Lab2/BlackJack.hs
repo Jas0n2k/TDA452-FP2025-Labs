@@ -159,22 +159,22 @@ shuffleDeck g hand = shuffleDeckHelper g hand Empty (size hand) -- Start with em
         -- Moves i cards from hand to acc in random order
         -- the index i indicates how many cards are left to pick from the hand
         shuffleDeckHelper :: StdGen -> Hand -> Hand -> Int -> Hand
-        shuffleDeckHelper g hand acc i
-            | i == 0    = acc -- When no cards left to pick, returns the accumulated & shuffled hand 
-            | otherwise = shuffleDeckHelper g' restAfterRemoval (Add removed acc) (i-1) -- Recurses to pick next card
+        shuffleDeckHelper g hand acc n
+            | n == 0    = acc -- When no cards left to pick, returns the accumulated & shuffled hand 
+            | otherwise = shuffleDeckHelper g' restAfterRemoval (Add removed acc) (n-1) -- Recurses to pick next card
 
             where 
-                (r, g') = randomR (1, i) g -- Picks a random index from 1 to i
-                (removed, restAfterRemoval) = removeNthCard r hand -- Remove the nth card from the hand  
+                (r, g') = randomR (1, n) g -- Picks a random index from 1 to n
+                (removed, restAfterRemoval) = removeNthCard r hand -- Remove the r-th card from the hand  
 
--- Removes the n:th card of the hand and returns (removedCard, restCards)
--- n ranges from 1 to (size hand)
+-- Removes the i-th card of the hand and returns (removedCard, restCards)
+-- i ranges from 1 to (size hand)
 removeNthCard :: Int -> Hand -> (Card, Hand)
 removeNthCard _ Empty = error "removeNthCard: The hand is empty."
 removeNthCard 1 (Add c rest) = (c, rest)  -- Base case: removes the first card
-removeNthCard n (Add c rest) = (removed, Add c restAfterRemoval) -- Recurses to find the nth card
+removeNthCard i (Add c rest) = (removed, Add c restAfterRemoval) -- Recurses to find the i-th card
     where 
-        (removed, restAfterRemoval) = removeNthCard (n-1) rest
+        (removed, restAfterRemoval) = removeNthCard (i-1) rest
 
 
 -- Checks if the card belongs to the hand
