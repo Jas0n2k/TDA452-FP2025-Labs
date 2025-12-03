@@ -220,7 +220,7 @@ prop_blanks_allBlanks = (blanks allBlankSudoku) == [(r, c) | r <- [0..8], c <- [
 
 (!!=) :: [a] -> (Int,a) -> [a]
 xs !!= (i,y) = before ++ y:after
-	where 
+  where 
     (before, _:after) = splitAt i xs
 
 prop_bangBangEquals_correct :: [Int] -> (Int, Int) -> Property
@@ -247,7 +247,7 @@ prop_update_updated (Sudoku rows) (row, col) cell = (row >= 0 && row < 9) && ( c
 solve :: Sudoku -> Maybe Sudoku
 solve sudoku 
     | (solutions == [])   =   Nothing
-    | otherwise           =   Just (head solutions)
+    | otherwise           =   Just (head solutions) -- Return the first solution found
   where
     solutions = solve' sudoku (blanks sudoku)
 
