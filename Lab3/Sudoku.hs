@@ -243,26 +243,50 @@ prop_update_updated (Sudoku rows) (row, col) cell = (row >= 0 && row < 9) && ( c
 ------------------------------------------------------------------------------
 
 -- * F1
+-- | solve takes in a sudoku and attemps to solve it, returning Nothing if unable to.
 solve :: Sudoku -> Maybe Sudoku
 solve sudoku 
     | (solutions == [])   =   Nothing
-    | isFilled sudoku     =   Just sudoku
-    | not (isOkay sudoku) =   Nothing
     | otherwise           =   Just (head solutions)
   where
     solutions = solve' sudoku (blanks sudoku)
 
     solve' :: Sudoku -> [(Int, Int)] -> [Sudoku]
-    solve' sudoku blanks 
-      | (not (isSudoku sudoku) || not (isOkay sudoku)) = []
-      | (length blanks == 0) = [sudoku]
-      | otherwise = map (\pos -> 
-          (map (\i -> solve (update sudoku pos (Just i))) [1..9])) blanks
+    solve' sud [] -- Case: blanks is empty
+      | isOkay sud = [sud] -- Found a valid solution
+      | otherwise  = [] -- No solution found
+    solve' sud (blank:rest)
+      | not (isOkay sud) = [] -- Early exit if the sudoku is already invalid
+      | otherwise = concatMap tryFilling [1..9] -- Try filling the blank with numbers from 1 to 9
+      where
+        tryFilling :: Int -> [Sudoku]
+        tryFilling num = solve' (update sud blank (Just num)) rest
 
 -- * F2
-
+-- | Reads a sudoku from a file, tries to solve it and prints the solution (or lack of one)
+readAndSolve :: FilePath -> IO ()
+readAndSolve file = do
+  sudoku <- readSudoku file
+  let solution = solve sudoku
+  case solution of
+     Just solved -> printSudoku solved
+     Nothing -> putStrLn $ "(no solution)"
 
 -- * F3
+-- | Verifies that the first argument (solution) is in fact a solution of the original sudoku
+isSolutionOf :: Sudoku -> Sudoku -> Bool
+isSolutionOf solution sudoku = isFilled solution && isOkay solution && all (\(r,c,v) -> solution_rows !! r !! c == v) filled_cells
+  where
+    filled_cells = [ (r, c, sudoku_rows !! r !! c) | 
+        (r, row) <- zip [0..] sudoku_rows, 
+        (c, cell) <- zip [0..] row, isJust cell ] -- All filled cells in original sudoku
+
+    solution_rows = rows solution
+    sudoku_rows = rows sudoku
 
 
 -- * F4
+-- | QuickCheck property validating that a solved sudoku is in fact a correct solution of the given sudoku
+prop_SolveSound :: Sudoku -> Property
+prop_SolveSound sudoku = isJust solved ==> fromJust solved `isSolutionOf` sudoku
+  where solved = solve sudoku
