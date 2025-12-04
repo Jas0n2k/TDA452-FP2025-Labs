@@ -207,43 +207,58 @@ isOkay s = all (\b -> isOkayBlock b) sudokuBlocks
 -- (0,0) is top left corner, (8,8) is bottom left corner
 type Pos = (Int,Int)
 
--- * E1
+-- * E1: Find all blank positions in a sudoku
 
 blanks :: Sudoku -> [Pos]
+-- | zip [0..] rows -> [(0,row0), (1,row1), ..., (8,row8)] (row index paired with row)
+-- | zip [0..] row -> [(0,cell0), (1,cell1), ..., (8,cell8)] (column index paired with cell)
+-- | Guard isNothing cell to filter only blank cells
 blanks (Sudoku rows) = [ (r, c) | (r, row) <- zip [0..] rows, (c, cell) <- zip [0..] row, isNothing cell ]
 
 prop_blanks_allBlanks :: Bool
 prop_blanks_allBlanks = (blanks allBlankSudoku) == [(r, c) | r <- [0..8], c <- [0..8] ]
 
 
--- * E2
+-- * E2: Update an element in a list at a given index
 
 (!!=) :: [a] -> (Int,a) -> [a]
 xs !!= (i,y) = before ++ y:after
   where 
     (before, _:after) = splitAt i xs
 
-prop_bangBangEquals_correct :: [Int] -> (Int, Int) -> Property
-prop_bangBangEquals_correct list (i, t) =  (i >= 0 && i < length list) ==> (list !! i) == t && length list == length (list !!= (i, t))  
+-- Use generated lists and indices to verify
+prop_bangBangEquals_correct :: [Int] -> Int -> Property
+prop_bangBangEquals_correct list v = 
+    not (null list) ==> 
+    forAll (choose (0, length list - 1)) $ \i -> 
+        let updatedList = list !!= (i, v)
+        in (updatedList !! i) == v && length list == length updatedList
 
--- * E3
+-- * E3: Update a cell in a sudoku at a given position
 
 update :: Sudoku -> Pos -> Cell -> Sudoku
 update (Sudoku sudoku) (row, col) cell = (Sudoku (sudoku !!= (row, ((sudoku !! row) !!= (col, cell)))))
 
-prop_update_updated :: Sudoku -> Pos -> Cell -> Property
-prop_update_updated (Sudoku rows) (row, col) cell = (row >= 0 && row < 9) && ( col >=0 && col < 9) ==>
-   (updated !! row) !! col == cell
-   where 
-    (Sudoku updated) = update (Sudoku rows) (row, col) cell
+-- Use generated valid positions and valid cells to verify
+prop_update_updated :: Sudoku -> Property
+prop_update_updated sudoku = forAll validPositions $ \(row, col) -> 
+    forAll cell $ \c ->
+        let (Sudoku updated) = update sudoku (row, col) c
+        in (updated !! row) !! col == c
+  where
+    validPositions = do
+      row <- choose (0, 8)
+      col <- choose (0, 8)
+      return (row, col)
 
 
 
 
 ------------------------------------------------------------------------------
 
--- * F1
--- | solve takes in a sudoku and attemps to solve it, returning Nothing if unable to.
+-- * F1: Take in a sudoku and attempt to solve it. 
+-- | Only return first found solution.
+-- | Return Nothing if unable to.
 solve :: Sudoku -> Maybe Sudoku
 solve sudoku 
     | (solutions == [])   =   Nothing
