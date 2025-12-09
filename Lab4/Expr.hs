@@ -8,23 +8,22 @@ import Test.QuickCheck
 
 data Expr
   = Bin Expr String Expr
-  | --   | Add Expr Expr
-    --   | Mul Expr Expr
-    Num Double
+  | Num Double
   | Var
   | Function String Expr
   deriving Eq
 
 instance Show Expr where
-   show = showExpr
-
--- Bin (Num (-1.0)) "*" (Bin (Function "sin" (Num 10.0)) "*" (Num 0.0))
+    show = showExpr
 
 x :: Expr
 x = Var
 
 num :: Double -> Expr
 num = Num
+
+
+-- Add and mul are also smart constructors that simplify the expression
 
 add, mul :: Expr -> Expr -> Expr
 add (Num 0.0) b = b
@@ -86,56 +85,43 @@ readExpr a = case c of
     c = parse expr clean
     clean = filter (not . isSpace) a
 
-expr   = foldl1 (\a b -> Bin a "+" b) <$> chain term (char '+')
---functions = factor <|> 
-term   = foldl1 (\a b -> Bin a "*" b) <$> chain factor (char '*')
-factor = varParser 
+expr = foldl1 (\a b -> Bin a "+" b) <$> chain term (char '+') 
+term = foldl1 (\a b -> Bin a "*" b) <$> chain app (char '*')
+app  = funParser "sin" <|> funParser "cos" <|> factor -- Function application 
+
+factor = 
+  varParser 
   <|> Num <$> numParser 
-  <|> funParser "sin" <|> funParser "cos"
-  <|> char '(' *> expr <* char ')'
+  <|> char '(' *> expr <* char ')' -- Ignore parenthesis in output
 
--- exprParser :: Parser Expr
--- exprParser = binParser '*'
-
+-- | Parser for variable "x"
 varParser :: Parser Expr
 varParser = do
   c <- char 'x'
   return Var
 
+-- | Parser for function with given name
 funParser :: String -> Parser Expr
 funParser f = do
   _ <- sequence $ map char f
-  e <- expr
+  e <- app -- Addition/multiplication within functions requires parenthesis, so we parse app instead of expr
   return $ Function f e
 
+-- | Parser for numbers (always doubles)
 numParser :: Parser Double
 numParser = readsP :: Parser Double
 
--- binParser :: Char -> Parser Expr
--- binParser c = do
---   _ <- exprParser
---   op <- char c
---   b <- exprParser
---   return (Bin a [op] b)
-
-test = "2*cos(2*x)"
-
 -- | Property for validating that reading back a shown expression gives the same expression
 prop_ShowReadExpr :: Expr -> Bool
-prop_ShowReadExpr expr = assocEq (fromJust $ readExpr (showExpr expr)) expr
+prop_ShowReadExpr expr = (fromJust $ readExpr (showExpr expr)) == assoc expr -- readExpr is already left-associative so we just need to "normalize" the input expression
 
-oke = Bin (Num 56) "*" (Bin Var "*" (Bin (Num 57) "*" (Num 53)))
-boke = (Bin (Bin (Bin (Num 56) "*" Var) "*" (Num 57)) "*" (Num 53))
--- 56 * (x * (57 * 53))
-
--- | Checks if two expressions are equal using association rules
-assocEq :: Expr -> Expr -> Bool
-assocEq (Bin (Bin a "+" b) "+" c) (Bin a' "+" (Bin b' "+" c')) = (assocEq a a') && (assocEq b b') && (assocEq c c') -- TODO: this can probably be refactored somehow...
-assocEq (Bin a "+" (Bin b "+" c)) (Bin (Bin a' "+" b') "+" c') = (assocEq a a') && (assocEq b b') && (assocEq c c') 
-
-assocEq (Bin (Bin a "*" b) "*" c) (Bin a' "*" (Bin b' "*" c')) = (assocEq a a') && (assocEq b b') && (assocEq c c')
-assocEq (Bin a "*" (Bin b "*" c)) (Bin (Bin a' "*" b') "*" c') = (assocEq a a') && (assocEq b b') && (assocEq c c')
-assocEq a b = a == b
+-- | Converts right-associative operations (a `op` (b `op` c)) into left ((a `op` b) `op` c)
+assoc :: Expr -> Expr
+assoc (Bin a "+" (Bin b "+" c)) = assoc (Bin (Bin a "+" b) "+" c)
+assoc (Bin a "*" (Bin b "*" c)) = assoc (Bin (Bin a "*" b) "*" c)
+assoc (Bin a op b) = Bin (assoc a) op (assoc b)
+assoc (Function f e) = Function f (assoc e)
+assoc e = e
 
 instance Arbitrary Expr where 
   arbitrary = sized arbExpr
@@ -146,13 +132,13 @@ arbExpr s = genExpr
   where 
     genExpr = frequency [
       (1, rVar), 
-      (s, rFunction "cos" s), 
-      (s, rFunction "sin" s), 
+      (s, rFunction s), 
+      (s, rFunction s), 
       (1, rNum), 
       (s, rBinOp s)]
     rNum = Num <$> choose (1.0, 100.0)
     rVar = return Var
-    rFunction f s = do
+    rFunction s = do
       let s' = (s `div` 2) -- Branch to make next size smaller
       f <- elements ["sin", "cos"] -- Random function
       Function f <$> arbExpr s'
@@ -167,15 +153,18 @@ arbExpr s = genExpr
 simplify :: Expr ->  Expr
 simplify (Bin a "*" b) = mul (simplify a) (simplify b)
 simplify (Bin a "+" b) = add (simplify a) (simplify b)
+simplify (Function f e) = Function f (simplify e)
 simplify a = a
 
 -- | Differentiates the given expression 
 differentiate :: Expr -> Expr
-differentiate (Bin a "+" b)  = Bin (differentiate a) "+" (differentiate b)
-differentiate (Bin a "*" b)  = Bin (Bin (differentiate a) "*" b) "+" (Bin (differentiate b) "*" a) -- Product rule
-differentiate (Function f x) = Bin (differentiateOuterFunction f x) "*" $ differentiate x -- Chain rule
-differentiate Var            = Num 1.0
-differentiate _              = Num 0.0
+differentiate e = simplify $ dif e
+  where 
+    dif (Bin a "+" b)  = Bin (dif a) "+" (dif b)
+    dif (Bin a "*" b)  = Bin (Bin (dif a) "*" b) "+" (Bin (dif b) "*" a) -- Product rule
+    dif (Function f x) = Bin (differentiateOuterFunction f x) "*" $ dif x -- Chain rule
+    dif Var            = Num 1.0
+    dif _              = Num 0.0
 
 -- | Differentiates the given function expression at top-level, i.e no chain rule
 differentiateOuterFunction :: String -> Expr -> Expr
