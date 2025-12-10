@@ -1,0 +1,17 @@
+{
+    "name": "Intro FP (GUI)",
+    "image": "oskeri097/intro-fp:lab4",
+    "customizations": {
+      "vscode": {
+        "extensions": [
+          "justusadam.language-haskell"
+        ]
+      },
+      "terminal.integrated.defaultProfile.linux": "zsh",
+      "terminal.integrated.profiles.linux": {
+        "zsh": {
+          "path": "/bin/zsh"
+        }
+      }
+    }
+  }
