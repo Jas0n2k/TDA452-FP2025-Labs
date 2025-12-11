@@ -152,7 +152,6 @@ arbExpr s = frequency [
 -- | F: Simplifies the given expression 
 -- | Merges addition/multiplication of numbers
 -- | Simplifies operations with identity element
--- | Evaluates functions that don't depend on x
 simplify :: Expr ->  Expr
 simplify (Bin a "+" b) = simplifyAdd (simplify a) (simplify b)
   where
@@ -170,11 +169,7 @@ simplify (Bin a "*" b) = simplifyMul (simplify a) (simplify b)
     simplifyMul a (Num 1.0) = a
     simplifyMul (Num a) (Num b) = Num (a * b)
     simplifyMul a b = Bin a "*" b
-simplify (Function f e) = simplifyFun $ Function f (simplify e)
-  where
-    simplifyFun :: Expr -> Expr
-    simplifyFun (Function f (Num a)) = Num $ eval (Function f (Num a)) 0.0
-    simplifyFun (Function f e) = Function f e
+simplify (Function f e) = Function f (simplify e)
 simplify a = a
 
 -- | G: Differentiates the given expression 
