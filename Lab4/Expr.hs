@@ -7,12 +7,15 @@ import Data.Maybe(fromJust)
 import Test.QuickCheck
 
 -- | A: Recusive data type Expr
+-- | I flattened binary operations and functions
 
 data Expr
-  = Bin Expr String Expr
-  | Num Double
+  = Num Double
   | Var
-  | Function String Expr
+  | Add Expr Expr
+  | Mul Expr Expr
+  | Sin Expr
+  | Cos Expr
   deriving Eq
 
 instance Show Expr where
@@ -26,167 +29,196 @@ num = Num
 
 -- Dumb contructors (logics moved to func simplify below)
 add, mul :: Expr -> Expr -> Expr
-add a b = Bin a "+" b
-mul a b = Bin a "*" b
+add = Add
+mul = Mul
 
 sin, cos :: Expr -> Expr
-sin = Function "sin"
-cos = Function "cos"
+sin = Sin
+cos = Cos
 
--- | Counts the number of functions and operators in the given expression
+-- Counts the number of functions and operators in the given expression
 size :: Expr -> Int
-size (Bin a _ b) = size a + size b + 1
-size (Function _ e) = size e + 1
+size (Add a b) = size a + size b + 1
+size (Mul a b) = size a + size b + 1
+size (Sin e) = size e + 1
+size (Cos e) = size e + 1
 size _ = 0 -- Not operators or functions
-
--- | Puts parenthesis around the given expression
-parenthesize :: Expr -> String
-parenthesize expr = "(" ++ showExpr expr ++ ")"
 
 -- | B: Converts the given expression into a string.
 -- | Will parenthesize + within multiplication operations
 -- | or + and * inside functions.
+
+-- Helper that puts parenthesis around the string
+-- Removes circular dependency of showExpr
+parenthesize :: String -> String
+parenthesize s = "(" ++ s ++ ")"
+
+-- Add parenthesis around factors that are additions
+showFactor :: Expr -> String
+showFactor (Add x y) = parenthesize (showExpr (Add x y))
+showFactor e = showExpr e
+
+-- Add parenthesis around function arguments that are binary operations
+showFunArg :: Expr -> String
+showFunArg e = case e of
+  Add _ _  -> parenthesize (showExpr e)
+  Mul _ _  -> parenthesize (showExpr e)
+  _        -> showExpr e
+
 showExpr :: Expr -> String
-showExpr Var = "x"
 showExpr (Num d) = show d
-showExpr (Function name e) = name ++ " " ++ showFactor e
-  where
-    -- Parenthesize any binary operation within a function
-    showFactor (Bin a op b) = parenthesize (Bin a op b) 
-    showFactor e = showExpr e
-showExpr (Bin a op b) = (showFactor a op) ++ op ++ (showFactor b op)
-  where
-    -- Parenthesize addition within multiplication
-    showFactor (Bin a "+" b) "*" = parenthesize (Bin a "+" b)
-    showFactor e _ = showExpr e
+showExpr Var = "x"
+showExpr (Add a b) = showExpr a ++ "+" ++ showExpr b
+showExpr (Mul a b) = showFactor a ++ "*" ++ showFactor b
+showExpr (Sin e) = "sin " ++ showFunArg e
+showExpr (Cos e) = "cos " ++ showFunArg e
 
 -- | C: Evaluates the given expression with the given value for x.
 eval :: Expr -> Double -> Double
-eval (Bin a "+" b) x      = eval a x + eval b x
-eval (Bin a "*" b) x      = eval a x * eval b x
-eval (Bin _ op _) _       = error $ "Unsupported binary operator: " ++ op
-eval (Function "cos" a) x = cosDouble $ eval a x
-eval (Function "sin" a) x = sinDouble $ eval a x
-eval (Function f _) _     = error $ "Unsupported function: " ++ f
-eval (Num d) _            = d
-eval Var x = x  -- returns the given x value
+eval (Num n) _            = n
+eval Var x                = x -- returns the given x value
+eval (Add a b) x          = eval a x + eval b x
+eval (Mul a b) x          = eval a x * eval b x
+eval (Sin e) x            = sinDouble (eval e x)
+eval (Cos e) x            = cosDouble (eval e x)
 
 -- | D: Attempts to parses the given string into an expression.
--- |    Returns Nothing on failure.
 readExpr :: String -> Maybe Expr
-readExpr a = case c of
-  Just (x, "")  -> Just x -- Ensure whole input is consumed
-  Just (x, _)   -> Just x -- Partial parse, still return result
-  _ -> Nothing
-  where
-    c = parse expr clean
-    clean = filter (not . isSpace) a
+readExpr s = case parse parseSum (filter (not . isSpace) s) of
+    Just (expr, "") -> Just expr -- Remaning is empty, successful parse
+    _               -> Nothing  -- Failed parse
 
-binOp :: String -> Expr -> Expr -> Expr
-binOp op a b = Bin a op b
+-- | Parse from lowest precedence to highest (addition -> multiplication -> factors)
 
-expr, term, factor :: Parser Expr
-expr = foldl1 (binOp "+") <$> chain term (char '+') 
-term = foldl1 (binOp "*") <$> chain factor (char '*') -- chain factor instead of app
+-- 1. Addition (Sum)
+parseSum :: Parser Expr
+parseSum = foldl1 Add <$> chain parseProduct (char '+')
 
-factor = funParser "sin" <|> funParser "cos" <|> atom
-  where atom = varParser <|> Num <$> numParser <|> char '(' *> expr <* char ')'
+-- `chain` parses a list of `parseProduct` separated by '+' characters. :: Parser [Expr]
+-- If no '+' chars, passes down
+-- `foldl1 Add` then combines this list into a left-associative addition expression.
+-- `<$>` applies the function to the result of the parser.
+-- e.g "1 + 2 + 3" -> Parser [1,2,3] -> Add (Add 1 2) 3
 
--- | Parser for variable "x"
-varParser :: Parser Expr
-varParser = do
-  char 'x' >> return Var
+-- 2. Multiplication (Product)
+parseProduct :: Parser Expr
+parseProduct = foldl1 Mul <$> chain parseFactor (char '*')
 
--- | Parser for function with given name
-funParser :: String -> Parser Expr
-funParser f = do
-  _ <- sequence $ map char f -- Parse function name char by char
-  e <- factor -- Only parse a factor as argument to allow chaining
-  -- eg: sin x+1 would be parsed as (sin x) + 1
-  return $ Function f e
+-- 3. Factors: functions, variables, numbers, parenthesized expressions (in this order)
+parseFactor :: Parser Expr
+parseFactor = 
+        parseSin
+    <|> parseCos
+    <|> parseNumber
+    <|> (char 'x' >> return Var)
+    <|> (char '(' *> parseSum <* char ')') -- Parenthesized expression, reset to lowest precedence
 
--- | Parser for numbers (always doubles)
-numParser :: Parser Double
-numParser = readsP :: Parser Double
+-- Helpers
+
+parseNumber :: Parser Expr
+parseNumber = Num <$> readsP
+
+-- | Since Parsing.hs does not export a parser for strings,
+-- | we borrow it from the course example "ParsingExamples.hs"
+string :: String -> Parser String
+string ""  = return ""
+string (c:s) = do
+  char c
+  string s
+  return (c:s)
+
+parseSin :: Parser Expr
+parseSin = do
+  string "sin"  -- Consume "sin"
+  e <- parseFactor -- Parse the argument
+  return (Sin e)
+
+parseCos :: Parser Expr
+parseCos = do
+  string "cos"
+  e <- parseFactor
+  return (Cos e)
+
+
+-- | Normalizes the tree structure
+-- | by converting right-associative operations into left
+-- | e.g A + (B + C)  ==> (A + B) + C
+assoc :: Expr -> Expr
+assoc (Add a (Add b c)) = assoc (Add (Add a b) c)
+assoc (Add a b)         = Add (assoc a) (assoc b)
+assoc (Mul a (Mul b c)) = assoc (Mul (Mul a b) c)
+assoc (Mul a b)         = Mul (assoc a) (assoc b)
+assoc (Sin e)           = Sin (assoc e)
+assoc (Cos e)           = Cos (assoc e)
+assoc e                 = e
+
+-- | E: Generates an arbitrary expression of the given size
 
 -- | Property for validating that reading back a shown expression gives the same expression
 prop_ShowReadExpr :: Expr -> Bool
-prop_ShowReadExpr expr = 
-  case readExpr (showExpr expr) of
+prop_ShowReadExpr e = 
+  case readExpr (showExpr e) of
     Nothing       -> False -- parsing failed, return false
     -- readExpr is already left-associative so only normalize the input expression
-    Just parsed   -> assoc parsed == assoc expr
-
--- | Normalizes the tree structure
--- | by converting right-associative operations (a `op` (b `op` c)) into left ((a `op` b) `op` c)
-assoc :: Expr -> Expr
-assoc (Bin a "+" (Bin b "+" c)) = assoc (Bin (Bin a "+" b) "+" c)
-assoc (Bin a "*" (Bin b "*" c)) = assoc (Bin (Bin a "*" b) "*" c)
-assoc (Bin a op b) = Bin (assoc a) op (assoc b)
-assoc (Function f e) = Function f (assoc e)
-assoc e = e
+    Just parsed   -> assoc parsed == assoc e
 
 instance Arbitrary Expr where 
   arbitrary = sized arbExpr
 
--- | E: Generates an arbitrary expression of the given size
 arbExpr :: Int -> Gen Expr
 arbExpr s = frequency [
     (1, rVar), 
-    (s, rFunction), 
     (1, rNum), 
+    (s, rFunction), 
     (s, rBinOp)]
   where 
     s' = s `div` 2 -- Branch to make next size smaller
     rNum = Num <$> choose (1.0, 100.0)
     rVar = return Var
     rFunction = do
-      f <- elements ["sin", "cos"] -- Random function
-      Function f <$> arbExpr s'
+      f <- elements [Sin, Cos]
+      e <- arbExpr s'
+      return $ f e
     rBinOp = do
-      op <- elements ["+", "*"] -- Random operator
+      op <- elements [Add, Mul]
       a <- arbExpr s'
       b <- arbExpr s'
-      return (Bin a op b)
+      return $ op a b
 
 -- | F: Simplifies the given expression 
 -- | Merges addition/multiplication of numbers
--- | Simplifies operations with identity element
+-- | Calculate functions with constant arguments
+
 simplify :: Expr ->  Expr
-simplify (Bin a "+" b) = simplifyAdd (simplify a) (simplify b)
-  where
-    simplifyAdd :: Expr -> Expr -> Expr
-    simplifyAdd (Num 0.0) b = b
-    simplifyAdd a (Num 0.0) = a
-    simplifyAdd (Num a) (Num b) = Num (a + b)
-    simplifyAdd a b = Bin a "+" b
-simplify (Bin a "*" b) = simplifyMul (simplify a) (simplify b)
-  where
-    simplifyMul :: Expr -> Expr -> Expr
-    simplifyMul (Num 0.0) _ = Num 0.0
-    simplifyMul _ (Num 0.0) = Num 0.0
-    simplifyMul (Num 1.0) b = b
-    simplifyMul a (Num 1.0) = a
-    simplifyMul (Num a) (Num b) = Num (a * b)
-    simplifyMul a b = Bin a "*" b
-simplify (Function f e) = Function f (simplify e)
-simplify a = a
+simplify (Add a b) = simplifyAdd (simplify a) (simplify b)
+simplify (Mul a b) = simplifyMul (simplify a) (simplify b)
+simplify (Sin e)   = simplifySin (simplify e)
+simplify (Cos e)   = simplifyCos (simplify e)
+simplify a         = a
 
--- | G: Differentiates the given expression 
-differentiate :: Expr -> Expr
-differentiate e = simplify $ dif e
-  where 
-    dif (Bin a "+" b)  = Bin (dif a) "+" (dif b)
-    dif (Bin a "*" b)  = Bin (Bin (dif a) "*" b) "+" (Bin (dif b) "*" a) -- Product rule
-    dif (Function f innerX) = Bin (differentiateOuterFunction f innerX) "*" $ dif innerX -- Chain rule
-    dif Var            = Num 1.0
-    dif _              = Num 0.0
+-- Helpers
+simplifyAdd :: Expr -> Expr -> Expr
+simplifyAdd (Num 0.0) b = b
+simplifyAdd a (Num 0.0) = a
+simplifyAdd (Num a) (Num b) = Num (a + b)
+simplifyAdd a b = Add a b
 
--- | Differentiates the given function expression at top-level, i.e no chain rule
-differentiateOuterFunction :: String -> Expr -> Expr
-differentiateOuterFunction "sin" x = Function "cos" x
-differentiateOuterFunction "cos" x = Bin (Num (-1.0)) "*" (Function "sin" x)
-differentiateOuterFunction f _ = error $ "Unsupported function for differentiation: " ++ f
+simplifyMul :: Expr -> Expr -> Expr
+simplifyMul (Num 0.0) _ = Num 0.0
+simplifyMul _ (Num 0.0) = Num 0.0
+simplifyMul (Num 1.0) b = b
+simplifyMul a (Num 1.0) = a
+simplifyMul (Num a) (Num b) = Num (a * b)
+simplifyMul a b = Mul a b
+
+simplifySin :: Expr -> Expr
+simplifySin (Num a) = Num (sinDouble a)
+simplifySin e       = Sin e
+
+simplifyCos :: Expr -> Expr
+simplifyCos (Num a) = Num (cosDouble a)
+simplifyCos e       = Cos e
+
 
 -- | Property for validating that simplify is sound, i.e simplification gives same value as original expression
 prop_simplify_sound :: Expr -> Double -> Bool
@@ -197,22 +229,41 @@ prop_simplify_noJunk :: Expr -> Bool
 prop_simplify_noJunk e = not $ containsJunk (simplify e) 
   where
     containsJunk :: Expr -> Bool
-    -- Addition between two numbers should be merged
-    containsJunk (Bin (Num _) "+" (Num _))   = True
-    containsJunk (Bin (Num _) "*" (Num _))   = True
-    -- Multiplication with zero is always 0
-    containsJunk (Bin (Num 0.0) "*" _) = True
-    containsJunk (Bin _ "*" (Num 0.0)) = True
-    -- Multiplication with 1 is always other operand
-    containsJunk (Bin (Num 1.0) "*" _) = True
-    containsJunk (Bin _ "*" (Num 1.0)) = True
-    -- Addition with 0 is always other operand
-    containsJunk (Bin (Num 0.0) "+" _) = True
-    containsJunk (Bin _ "+" (Num 0.0)) = True
-    -- Functions with values not dependent on x should be evaluated
-    containsJunk (Function f (Num a)) = True
-    -- Recursively check if subexpressions contain junk
-    containsJunk (Bin a _ b)    = containsJunk a || containsJunk b
-    containsJunk (Function _ e) = containsJunk e
+    -- Addition Junks
+    -- both sides are numbers
+    containsJunk (Add (Num _) (Num _))   = True
+    -- with zeros
+    containsJunk (Add (Num 0.0) _) = True
+    containsJunk (Add _ (Num 0.0)) = True
 
+    -- Multiplication Junks
+    -- both sides are numbers
+    containsJunk (Mul (Num _) (Num _))   = True
+    -- with zeros
+    containsJunk (Mul (Num 0.0) _) = True
+    containsJunk (Mul _ (Num 0.0)) = True
+    -- with ones
+    containsJunk (Mul (Num 1.0) _) = True
+    containsJunk (Mul _ (Num 1.0)) = True
+
+    -- Function Junks: constant arguments
+    containsJunk (Sin (Num _)) = True
+    containsJunk (Cos (Num _)) = True
+    -- Recursively check if subexpressions contain junk
+    containsJunk (Add a b)    = containsJunk a || containsJunk b
+    containsJunk (Mul a b)    = containsJunk a || containsJunk b
+    containsJunk (Sin e)      = containsJunk e
+    containsJunk (Cos e)      = containsJunk e
     containsJunk _ = False
+
+-- | G: Differentiates the given expression 
+differentiate :: Expr -> Expr
+differentiate e = simplify (deriv e)
+  where
+    deriv :: Expr -> Expr
+    deriv (Num _)   = Num 0.0       -- Derivative of constant is 0
+    deriv Var       = Num 1.0       -- Derivative of x is 1
+    deriv (Add a b) = Add (deriv a) (deriv b)      -- Sum Rule
+    deriv (Mul a b) = Add (Mul (deriv a) b) (Mul a (deriv b)) -- Product Rule: (uv)' = u'v + uv'
+    deriv (Sin e)   = Mul (Cos e) (deriv e)                   -- Chain Rule: (sin u)' = cos u * u'
+    deriv (Cos e)   = Mul (Num (-1.0)) (Mul (Sin e) (deriv e)) -- Chain Rule: (cos u)' = -sin u * u'
