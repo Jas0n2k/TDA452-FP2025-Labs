@@ -38,6 +38,12 @@ prompt :: String -> IO String
 prompt text = do
   putStr text
   hFlush stdout
+  strip <$> getLine
+
+promptYesAndNo :: IO String
+promptYesAndNo = do
+  putStr "(yes/no): "
+  hFlush stdout
   map toLower . strip <$> getLine
 
 -- | Default Quiz Data
@@ -60,7 +66,7 @@ defaultQA =
 play :: QA -> IO QA
 play (Question q yesTree noTree) = do
   putStrLn q
-  ans <- prompt "(yes/no): "
+  ans <- promptYesAndNo
   if ans == yesAnswer
     then do
       -- fall into yes subtree
@@ -78,7 +84,7 @@ play (Question q yesTree noTree) = do
           play (Question q yesTree noTree)
 play (Answer a) = do
   putStrLn ("My guess: Is it " ++ a ++ "?")
-  ans <- prompt "(yes/no): "
+  ans <- promptYesAndNo
   if ans == yesAnswer
     then do
       putStrLn "Hurray! I won!"
@@ -117,7 +123,7 @@ gameLoop qaTree = do
 
   -- Ask to play again
   putStrLn "Play again?"
-  againAns <- prompt "(yes/no): "
+  againAns <- promptYesAndNo
   if againAns == yesAnswer
     then gameLoop newQATree
     else do
