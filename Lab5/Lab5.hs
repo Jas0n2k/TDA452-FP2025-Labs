@@ -2,7 +2,7 @@ module Lab5 where
 
 import Data.Char (isSpace, toLower)
 import Data.List (dropWhile, dropWhileEnd)
-import System.IO (hFlush, stdout)
+import System.IO (hFlush, stdout, readFile')
 import System.IO.Error (tryIOError)
 import Text.Read (readMaybe)
 
@@ -40,11 +40,23 @@ prompt text = do
   hFlush stdout
   strip <$> getLine
 
-promptYesAndNo :: IO String
+-- | Prompts user to type yes or no and returns the result
+-- | Will retry if user input is invalid 
+promptYesAndNo :: IO Bool
 promptYesAndNo = do
   putStr "(yes/no): "
   hFlush stdout
-  map toLower . strip <$> getLine
+  ans <- map toLower . strip <$> getLine
+  if ans == yesAnswer
+    then do
+      return True
+    else
+      if ans == noAnswer
+        then do
+          return False
+        else do
+          putStrLn "Please answer 'yes' or 'no'!!!"
+          promptYesAndNo
 
 -- | Default Quiz Data
 -- | Taken from Lab5 diagram
@@ -67,45 +79,36 @@ play :: QA -> IO QA
 play (Question q yesTree noTree) = do
   putStrLn q
   ans <- promptYesAndNo
-  if ans == yesAnswer
-    then do
+  if ans then 
+    do
       -- fall into yes subtree
       newYesTree <- play yesTree
       return (Question q newYesTree noTree)
-    else
-      if ans == noAnswer
-        then do
-          -- fall into no subtree
-          newNoTree <- play noTree
-          return (Question q yesTree newNoTree)
-        else do
-          -- invalid answer, ask again
-          putStrLn "Please answer 'yes' or 'no'!!!"
-          play (Question q yesTree noTree)
+   else 
+    do
+       -- fall into no subtree
+       newNoTree <- play noTree
+       return (Question q yesTree newNoTree)
+
 play (Answer a) = do
   putStrLn ("My guess: Is it " ++ a ++ "?")
   ans <- promptYesAndNo
-  if ans == yesAnswer
+  if ans
     then do
       putStrLn "Hurray! I won!"
       return (Answer a)
-    else
-      if ans == noAnswer
-        then do
-          -- Wrong guess, learn new person
-          putStrLn "OK - you won this time."
-          putStrLn "Just curious: Who was your famous person?"
-          correctPerson <- prompt "Enter name: "
+    else 
+      do
+        -- Wrong guess, learn new person
+        putStrLn "OK - you won this time."
+        putStrLn "Just curious: Who was your famous person?"
+        correctPerson <- prompt "Enter name: "
 
-          putStrLn ("Give me a question for which the answer for " ++ correctPerson ++ " is 'yes', and for " ++ a ++ " is 'no'.")
-          newQuestion <- prompt "Enter question: "
+        putStrLn ("Give me a question for which the answer for " ++ correctPerson ++ " is 'yes', and for " ++ a ++ " is 'no'.")
+        newQuestion <- prompt "Enter question: "
 
-          -- Construct the new tree node
-          return (question newQuestion (guess correctPerson) (guess a))
-        else do
-          -- invalid answer, ask again
-          putStrLn "Please answer 'yes' or 'no'!!!"
-          play (Answer a)
+        -- Construct the new tree node
+        return (question newQuestion (guess correctPerson) (guess a))
 
 -- | Create questions.qa from a decision tree
 writeQFile :: QA -> IO ()
@@ -124,7 +127,7 @@ gameLoop qaTree = do
   -- Ask to play again
   putStrLn "Play again?"
   againAns <- promptYesAndNo
-  if againAns == yesAnswer
+  if againAns
     then gameLoop newQATree
     else do
       putStrLn "Saving QA file..."
@@ -135,7 +138,7 @@ gameLoop qaTree = do
 main :: IO ()
 main = do
   -- Try to read existing questions.qa file
-  qaTreeOrError <- tryIOError (readFile "questions.qa")
+  qaTreeOrError <- tryIOError (readFile' "questions.qa")
   -- tryIOError returns Either IOError String
   qaTree <- case qaTreeOrError of
     Left err -> do
