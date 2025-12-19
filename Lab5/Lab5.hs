@@ -1,7 +1,5 @@
 module Lab5 where
 
-import Data.Char (isSpace, toLower)
-import Data.List (dropWhile, dropWhileEnd)
 import System.IO (hFlush, stdout, readFile')
 import System.IO.Error (tryIOError)
 import Text.Read (readMaybe)
@@ -28,35 +26,25 @@ question = Question
 guess :: String -> QA
 guess = Answer
 
--- | Gameplay helpers
-strip :: String -> String
-strip = dropWhile isSpace . dropWhileEnd isSpace
-
 -- | Display prompt message and get user input
 -- | Strip whitespace and convert to lowercase before returning
 prompt :: String -> IO String
 prompt text = do
   putStr text
   hFlush stdout
-  strip <$> getLine
+  getLine
 
 -- | Prompts user to type yes or no and returns the result
 -- | Will retry if user input is invalid 
 promptYesAndNo :: IO Bool
 promptYesAndNo = do
-  putStr "(yes/no): "
-  hFlush stdout
-  ans <- map toLower . strip <$> getLine
-  if ans == yesAnswer
-    then do
-      return True
-    else
-      if ans == noAnswer
-        then do
-          return False
-        else do
-          putStrLn "Please answer 'yes' or 'no'!!!"
-          promptYesAndNo
+  ans <- prompt $ "(" ++ yesAnswer ++ "/" ++ noAnswer ++ "): "
+  case ans of
+    x | x == yesAnswer -> return True
+    x | x == noAnswer -> return False
+    otherwise -> do
+        putStrLn $ "Please answer '" ++ yesAnswer ++ "' or '" ++ noAnswer ++ "'!!!"
+        promptYesAndNo
 
 -- | Default Quiz Data
 -- | Taken from Lab5 diagram
@@ -78,8 +66,8 @@ defaultQA =
 play :: QA -> IO QA
 play (Question q yesTree noTree) = do
   putStrLn q
-  ans <- promptYesAndNo
-  if ans then 
+  yes <- promptYesAndNo
+  if yes then 
     do
       -- fall into yes subtree
       newYesTree <- play yesTree
@@ -92,8 +80,8 @@ play (Question q yesTree noTree) = do
 
 play (Answer a) = do
   putStrLn ("My guess: Is it " ++ a ++ "?")
-  ans <- promptYesAndNo
-  if ans
+  yes <- promptYesAndNo
+  if yes
     then do
       putStrLn "Hurray! I won!"
       return (Answer a)
@@ -126,8 +114,8 @@ gameLoop qaTree = do
 
   -- Ask to play again
   putStrLn "Play again?"
-  againAns <- promptYesAndNo
-  if againAns
+  again <- promptYesAndNo
+  if again
     then gameLoop newQATree
     else do
       putStrLn "Saving QA file..."
